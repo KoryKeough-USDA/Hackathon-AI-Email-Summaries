@@ -5,18 +5,32 @@ message("Loading packages")
 library(remotes)
 library(devtools)
 # RDCOMClient can be installed by running pak::pak('omegahat/RDCOMClient')
+pak::pak('omegahat/RDCOMClient')
 library(RDCOMClient)
 library(tidyverse)
 library(lubridate)
 library(curl)
 library(ellmer)
+library(xml2)
+
+if(file.exists("scheduler_config.rds")){
+  message("Loading scheduler_config.rds")
+  scheduler_config <- readRDS("scheduler_config.rds")
+  sharedEmail <- scheduler_config$sharedEmail
+  folderType <- scheduler_config$folderType
+  freq <- scheduler_config$freq
+  start_taskscheduler_date <- scheduler_config$start_taskscheduler_date
+  folder_dir <- scheduler_config$folder_dir
+} else {
+  message("scheduler_config.rds not found. Please run the hackathon_shiny_app.R script to create the configuration file.")
+}
 
 message("Starting Outlook application, getting the MAPI namespace, and accessing inbox messages")
 OutApp_scheduler <- COMCreate("Outlook.Application")
 outlookNameSpace_scheduler <- OutApp_scheduler$GetNameSpace("MAPI")
 
 # Delete the next 2 lines whenever you want to summarize emails from your own Outlook folder.
-recipient_scheduler <- outlookNameSpace_scheduler$Createrecipient_scheduler(sharedEmail)
+recipient_scheduler <- outlookNameSpace_scheduler$CreateRecipient(sharedEmail)
 recipient_scheduler$Resolve()
 
 # Set the inbox_scheduler variable to "outlookNameSpace_scheduler$GetDefaultFolder(6)" whenever you want to summarize emails from your own inbox.
@@ -43,13 +57,11 @@ if(freq == "DAILY"){
 
 number_of_emails_scheduler <- messages_scheduler$Restrict(filter_string_total_scheduler)
 
-days_in_between_scheduler <- as.numeric(difftime(end_date, start_date, units = "days"))
-
 # Any select emails received on or after "start_date" below will be flagged.
 if (number_of_emails_scheduler$Count() > 0) {
 for (j in 0:days_in_between_scheduler) {
-  day_beginning_scheduler <- format(Sys.time() - (j*86400), "%m/%d/%Y 12:00 AM")
-  day_end_scheduler <- format(Sys.time() - (j*86400), "%m/%d/%Y 11:59 PM")
+  day_beginning_scheduler <- format(Sys.Date() - j, "%m/%d/%Y 12:00 AM")
+  day_end_scheduler <- format(Sys.Date() - j, "%m/%d/%Y 11:59 PM")
 
   filter_string_scheduler <- paste0("[ReceivedTime] >= '", day_beginning_scheduler, "' AND [ReceivedTime] < '", day_end_scheduler, "'")
   this_days_emails_scheduler <- messages_scheduler$Restrict(filter_string_scheduler)
@@ -67,7 +79,7 @@ for (j in 0:days_in_between_scheduler) {
     # chat_github was discontinued on July 30, 2026
     # Set up GROQ_API_KEY in .Renviron and sign up on the Groq website using your email address before proceeding
     chat_scheduler <- chat_groq(model = "llama-3.3-70b-versatile")
-    summary_chunk_scheduler <- chat_scheduler$chat(paste0("Summarize the following emails:\n\n", combined_emails_scheduler))
+    summary_chunk_scheduler <- chat_scheduler$chat(paste0("Summarize the following emails and explicitly tell me if any actions need to be taken:\n\n", combined_emails_scheduler))
     total_summary_scheduler <- c(total_summary_scheduler, summary_chunk_scheduler)
   } else {
     message("No emails to summarize this day.")

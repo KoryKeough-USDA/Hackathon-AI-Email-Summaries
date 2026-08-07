@@ -2,18 +2,48 @@ library(shiny)
 library(shinyjs)
 library(shinyFiles)
 library(htmltools)
+library(tidyverse)
+library(taskscheduleR)
+library(lubridate)
+library(remotes)
+library(devtools)
+# RDCOMClient can be installed by running pak::pak('omegahat/RDCOMClient')
+library(RDCOMClient)
+library(curl)
+library(ellmer)
+library(xml2)
+
+source("hackathon_r_file.R")
+source("task_scheduler.R")
+
+input_to <- textInput(inputId = "to_text", label = NULL, value = " to ")
+input_to$children[[2]] <- tagAppendAttributes(input_to$children[[2]], readonly = "readonly")
+
+input_colon <- textInput(inputId = "colon", label = NULL, value = ":")
+input_colon$children[[2]] <- tagAppendAttributes(input_colon$children[[2]], readonly = "readonly")
 
 # Define UI for application
 ui <- fluidPage(
   useShinyjs(),
+  tags$head(
+    tags$style(HTML("
+      hr {
+        border: none;
+        height: 3px;
+        background-color: black;
+      }
+    "))
+  ),
   titlePanel("AI Email Summaries Shiny App"),
   br(),
   textInput(inputId = "email", label = "Outlook Email"),
   br(),
-  shinyDirButton('folder', 'Select a desktop folder to save AI summaries to', 'Please select a folder', multiple = FALSE),
+  shinyDirButton('folder', 'Select a desktop folder to save AI summaries to', 'Please select a folder', icon = icon("folder-open"), multiple = FALSE),
+  verbatimTextOutput("path_display"),
   br(),
   selectInput("folderType", "Which Outlook folder should the AI summarize emails from?", 
               choices = c("Inbox", "Archives")),
+  hr(),
   br(),
   
   fluidRow(
@@ -24,23 +54,21 @@ ui <- fluidPage(
            h4("From which dates should the AI summarize emails?", style = "font-weight: bold;"),
               # Create a date input with label, default value, and limits
            fluidRow(
-             column(width = 2, dateInput(
+             column(width = 5, dateInput(
                                  inputId = "start_date",          
-                                 label = "Date:",    
+                                 label = "Start Date:",    
                                  value = Sys.Date(),    # Default date (today)
                                  min = NULL,          
-                                 max = Sys.Date(),         
+                                 max = Sys.Date(),        
                                  format = "mm/dd/yyyy",
                                  startview = "month"
                    )
            ),
-           column(width = 2, tagAppendAttributes(
-             textInput(inputId = "to_text", label = NULL, value = " to "),
-             readonly = "readonly")
+           column(width = 2, input_to
                  ),
-           column(width = 2, dateInput(
+           column(width = 5, dateInput(
                                 inputId = "end_date",          
-                                label = "Date:",    
+                                label = "End Date:",    
                                 value = Sys.Date(),    # Default date (today)
                                 min = NULL,          
                                 max = Sys.Date(),         
@@ -50,7 +78,7 @@ ui <- fluidPage(
         )
     ),
              hr(), # Visual divider line
-    downloadButton("run_ai_summary", "Run AI Summary", icon = icon("play")),
+    actionButton("run_ai_summary", "Run AI Summary", icon = icon("play")),
            ),
     column(width = 6,
            wellPanel(
@@ -60,43 +88,43 @@ ui <- fluidPage(
              br(),
              h4("Set Time to Run Task Scheduler Using 24-hour Time Format", style = "font-weight: bold;"),
              fluidRow(
-             column(width = 2, numericInput(inputId = "hours", label = NULL, value = 0, min = 0, max = 23, step = 1)),
-             column(width = 2, tagAppendAttributes(
-                                                  textInput(inputId = "colon", label = NULL, value = ":"),
-                                                  readonly = "readonly")
+               column(width = 5, numericInput(inputId = "hours", label = NULL, value = 0, min = 0, max = 23, step = 1)),
+               column(width = 2, input_colon
                     ),
-             column(width = 2, numericInput(inputId = "minutes", label = NULL, value = 0, min = 0, max = 59, step = 1)),
+               column(width = 5, numericInput(inputId = "minutes", label = NULL, value = 0, min = 0, max = 59, step = 1)),
              ),
              br(),
              h4("When Should the Task Scheduler First Run?", style = "font-weight: bold;"),
              # Create a date input with label, default value, and limits
-             column(width = 4, dateInput(
+             fluidRow(
+               column(width = 8, dateInput(
                       inputId = "start_taskscheduler_date",          
                       label = "Date:",    
-                      value = Sys.Date(),    # Default date (today)
+                      value = NULL,
                       min = Sys.Date(),          
                       max = NULL,         
-                      format = "yyyy-mm-dd",
+                      format = "mm/dd/yyyy",
                       startview = "month"
              )
              ),
-             column(width = 2, checkboxInput(
+             column(width = 4, checkboxInput(
                       inputId = "last_day_of_month", 
                       label = "Last Day of Each Month", 
                       value = FALSE
+             )
              )
              ),
              hr(),
                actionButton("run_task_scheduler", "Run Task Scheduler", class = "btn-success"),
              br(),
-               actionButton("remove_task_scheduler", "Remove Scheduled Tasks", class = "btn-danger"),
+             br(),
+               actionButton("remove_task_scheduler", "Stop Performing Scheduled Tasks", class = "btn-danger"),
            )
         )
     )
 )
 
 
-message("Outputting and saving summary")
 server <- function(input, output, session) {
   roots <- getVolumes()()
   shinyDirChoose(input, 'folder', roots = roots, session = session)
@@ -104,66 +132,97 @@ server <- function(input, output, session) {
     req(input$folder)
     parseDirPath(roots, input$folder)
   })
-  run_email_summary_once_selections <- reactive({
+  week_day <- reactive({
+    req(input$freq)
+    toupper(format(weekdays(input$start_taskscheduler_date), "%a"))
+  })
+  
+  output$path_display <- renderText({
+    if (length(folder_dir()) == 0) {
+      "No folder selected yet."
+    } else {
+      folder_dir()
+    }
+  })
+  
+  run_email_summary_once_selections <- observe({
     run_email_summary_once(
       sharedEmail = input$email,
+      folder_dir = folder_dir(),
       folderType = input$folderType,
       start_date  = input$start_date,
       end_date   = input$end_date
     )
   }) %>%
-    bindEvent(input$run_ai_summary, ignoreInit = TRUE)
-  output$run_ai_summary <- downloadHandler(
-    filename = function() {
-      paste0("Groq_email_summary_", format(Sys.Date(), "%m%d%Y"), ".txt")
-    },
-    content = function(file) {
-      req(run_email_summary_once_selections())
-      req(folder_dir())
-      writeLines(total_summary, file)
-      writeLines(total_summary, paste0(folder_dir(), "/Groq_email_summary", todays_date, ".txt"))
-    }
-  )
-  schtasks_extra <- reactiveVal(value = "")
+    bindEvent(input$run_ai_summary)
+  
+  start_taskscheduler_day <- reactiveVal(value = c("*", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", 1:31))
+  modifier <- reactiveVal(value = "")
+  
   observe({
-    if (input$freq == "DAILY" | input$freq == "WEEKLY") {
+    if (input$freq == "DAILY") {
+      shinyjs::reset("last_day_of_month")
       shinyjs::disable("last_day_of_month")
+    } else if (input$freq == "WEEKLY") {
+      shinyjs::reset("last_day_of_month")
+      shinyjs::disable("last_day_of_month")
+      start_taskscheduler_day(week_day())
     } else if (input$freq == "MONTHLY") {
       shinyjs::enable("last_day_of_month")
     }
   }) %>%
     bindEvent(input$freq)
+  
   observe({
     if (input$last_day_of_month) {
       shinyjs::disable("start_taskscheduler_date")
-      schtasks_extra("/mo LASTDAY /m *")
-    } else {
+      modifier("LASTDAY")
+    } else if (!isTruthy(input$last_day_of_month) && input$freq == "MONTHLY") {
       shinyjs::enable("start_taskscheduler_date")
-    }
+      start_taskscheduler_day(value = day(as.Date(input$start_taskscheduler_date)))
+    } 
   }) %>%
-    bindEvent(input$last_day_of_month)
-  observe({
-      sharedEmail <- input$email
-      folder_dir <- folder_dir()
-      folderType <- input$folderType
-      start_taskscheduler_date  = input$start_taskscheduler_date
-      freq = input$freq
-      source("hackathon_r_file_scheduler.R", local = TRUE)
-    })
+    bindEvent(input$last_day_of_month, input$start_taskscheduler_date)
   
   observe({
-    task_scheduler_emails(
-      freq = input$freq,
-      start_time = paste0(sprintf("%02d", input$hours), ":", sprintf("%02d", input$minutes)),
+    saveRDS(list(
+      sharedEmail = input$email,
+      folderType <- input$folderType,
+      folder_dir <- folder_dir(),
       start_taskscheduler_date  = input$start_taskscheduler_date,
-      start_taskscheduler_day  = input$start_taskscheduler_day,
-      schtasks_extra   = input$schtasks_extra
-    )
-  }) %>%
+      freq = input$freq),
+      file = "scheduler_config.rds")
+    }) %>%
     bindEvent(input$run_task_scheduler)
   
+  start_time <- reactiveVal()
+  
   observe({
-    taskscheduler_delete(taskname = "hackathon_r_file_scheduler")
+    start_time(paste0(sprintf("%02d", input$hours), ":", sprintf("%02d", input$minutes)))
+  })
+  
+  observe({
+    if (input$last_day_of_month) {
+    task_scheduler_emails(
+      freq = input$freq,
+      start_time = start_time(),
+      start_taskscheduler_date = input$start_taskscheduler_date,
+      last_day = modifier()
+    )
+  } else if (!isTruthy(input$last_day_of_month)) {
+      task_scheduler_emails(
+        freq = input$freq,
+        start_time = start_time(),
+        start_taskscheduler_date = input$start_taskscheduler_date,
+        start_taskscheduler_day = start_taskscheduler_day(),
+        last_day = ""
+      )
+    }
+  }) %>%
+      bindEvent(input$run_task_scheduler)
+  
+  observe({
+    taskscheduler_delete(taskname = "Hackathon_Task_Scheduler")
   }) %>%
   bindEvent(input$remove_task_scheduler)
 }
