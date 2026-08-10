@@ -93,9 +93,12 @@ for (j in 0:days_in_between_scheduler) {
             }, error = function(e) "")
           } else if (!nzchar(trimws(email_text_scheduler))) {
             clean_text_scheduler <- tryCatch({
+              item_scheduler$Display()
               inspector_scheduler <- item_scheduler$GetInspector()
               word_doc_scheduler <- inspector_scheduler$WordEditor()
-              word_doc_scheduler[["Content"]][["Text"]]
+              word_doc_scheduler$Range()$Select()
+              word_doc_scheduler$Range()$Copy()
+              paste(readClipboard(), collapse="\n")
             }, error = function(e) "")
             if (clean_text_scheduler == "") {
               clean_text_scheduler <- tryCatch({
@@ -104,6 +107,7 @@ for (j in 0:days_in_between_scheduler) {
               }, error = function(e) "")
             }
           }
+          item_scheduler$Close(0)
         } else if (body_format_scheduler == 1) {
           # Plain text format
           clean_text_scheduler <- tryCatch({

@@ -83,9 +83,12 @@ for (j in 0:days_in_between) {
             }, error = function(e) "")
         } else if (!nzchar(trimws(email_text))) {
               clean_text <- tryCatch({
+                item$Display()
                 inspector <- item$GetInspector()
                 word_doc <- inspector$WordEditor()
-                word_doc[["Content"]][["Text"]]
+                word_doc$Range()$Select()
+                word_doc$Range()$Copy()
+                paste(readClipboard(), collapse="\n")
               }, error = function(e) "")
               if (clean_text == "") {
                 clean_text <- tryCatch({
@@ -94,6 +97,7 @@ for (j in 0:days_in_between) {
               }, error = function(e) "")
               }
         }
+          item$Close(0)
       } else if (body_format == 1) {
         # Plain text format
         clean_text <- tryCatch({
