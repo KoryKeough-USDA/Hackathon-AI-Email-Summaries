@@ -134,10 +134,11 @@ server <- function(input, output, session) {
     parseDirPath(roots, input$folder)
   })
   week_day <- reactive({
-    req(input$freq)
-    toupper(format(weekdays(input$start_taskscheduler_date), "%a"))
+    if (input$freq == "WEEKLY") {
+      str_trunc(toupper(weekdays(input$start_taskscheduler_date)), 3, ellipsis = "")
+    }
   })
-  
+           
   output$path_display <- renderText({
     if (length(folder_dir()) == 0) {
       "No folder selected yet."
@@ -167,7 +168,6 @@ server <- function(input, output, session) {
     } else if (input$freq == "WEEKLY") {
       shinyjs::reset("last_day_of_month")
       shinyjs::disable("last_day_of_month")
-      start_taskscheduler_day(week_day())
     } else if (input$freq == "MONTHLY") {
       shinyjs::enable("last_day_of_month")
     }
@@ -180,10 +180,16 @@ server <- function(input, output, session) {
       modifier("LASTDAY")
     } else if (!isTruthy(input$last_day_of_month) && input$freq == "MONTHLY") {
       shinyjs::enable("start_taskscheduler_date")
-      start_taskscheduler_day(value = day(as.Date(input$start_taskscheduler_date)))
-    } 
-  }) %>%
-    bindEvent(input$last_day_of_month, input$start_taskscheduler_date)
+      new_value <- day(as.Date(input$start_taskscheduler_date))
+    } else if (input$freq == "WEEKLY") {
+        new_value <- week_day()
+    }
+    else if (input$freq == "DAILY") {
+      new_value <- c("*", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN", 1:31)
+    }
+    start_taskscheduler_day(new_value)
+    }) %>%
+    bindEvent(input$last_day_of_month, input$start_taskscheduler_date, input$freq)
   
   observe({
     saveRDS(list(
