@@ -1,3 +1,6 @@
+# The webpage containing the version of this code submitted with the
+# hackathon can be found at https://github.com/KoryKeough-USDA/Hackathon-AI-Email-Summaries/commit/5d8d2224342c75dd78c64af71c5eca290940a5fc
+
 library(shiny)
 library(shinyjs)
 library(shinyFiles)
